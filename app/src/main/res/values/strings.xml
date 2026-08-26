@@ -1,0 +1,19 @@
+<resources>
+    <string name="app_name">Note A</string>
+    <string name="search_notes_hint">بحث في الملاحظات والوسوم...</string>
+    <string name="new_note">ملاحظة جديدة</string>
+    <string name="title_hint">العنوان</string>
+    <string name="content_hint">ابدأ بكتابة أفكارك هنا...</string>
+    <string name="folders">المجلدات</string>
+    <string name="all_notes">كل الملاحظات</string>
+    <string name="tags">الوسوم</string>
+    <string name="statistics">الإحصائيات</string>
+    <string name="settings">الإعدادات</string>
+    <string name="backup_restore">النسخ الاحتياطي والاستعادة</string>
+    <string name="security_lock">حماية التطبيق</string>
+    <string name="delete">حذف</string>
+    <string name="share">مشاركة</string>
+    <string name="pin">تثبيت</string>
+    <string name="unpin">إلغاء التثبيت</string>
+    <string name="move_to_folder">نقل إلى مجلد</string>
+</resources>

@@ -1,0 +1,101 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build Type (debug or release)'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 🚀 Build APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: ☕ Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: 📱 Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 🐘 Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+          cache-read-only: false
+
+      - name: 🔧 Grant Execute Permission for Gradlew
+        run: |
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+          fi
+
+      - name: 🏗️ Build APK
+        env:
+          BUILD_TYPE: ${{ github.event.inputs.build_type || 'debug' }}
+        run: |
+          echo "Building APK for mode: $BUILD_TYPE..."
+          if [ "$BUILD_TYPE" = "release" ]; then
+            ./gradlew :app:assembleRelease --stacktrace || gradle :app:assembleRelease --stacktrace
+          else
+            ./gradlew :app:assembleDebug --stacktrace || gradle :app:assembleDebug --stacktrace
+          fi
+
+      - name: 🔍 Locate Built APK
+        id: find_apk
+        run: |
+          echo "Listing generated APK files:"
+          APK_FILE=$(find app/build/outputs/apk -type f -name "*.apk" | head -n 1)
+          if [ -z "$APK_FILE" ]; then
+            echo "::error::No APK file found in app/build/outputs/apk"
+            exit 1
+          fi
+          echo "Found APK: $APK_FILE"
+          echo "apk_path=$APK_FILE" >> $GITHUB_OUTPUT
+          echo "apk_filename=$(basename $APK_FILE)" >> $GITHUB_OUTPUT
+
+      - name: 📤 Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoteA-${{ github.event.inputs.build_type || 'debug' }}-apk
+          path: ${{ steps.find_apk.outputs.apk_path }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 📝 Add Build Summary
+        run: |
+          echo "### 🚀 Note A - Build Completed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package ID:** \`ayman.note\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact:** \`${{ steps.find_apk.outputs.apk_filename }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Mode:** \`${{ github.event.inputs.build_type || 'debug' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** \`${{ github.actor }}\`" >> $GITHUB_STEP_SUMMARY

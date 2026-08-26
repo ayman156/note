@@ -1,0 +1,6 @@
+{
+  "name": "Note A",
+  "description": "تطبيق ملاحظات احترافي خفيف وأنيق باسم Note A مع دعم العربية والمجلدات والوسوم والأمان والنسخ الاحتياطي.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
