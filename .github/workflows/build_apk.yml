@@ -53,21 +53,25 @@ jobs:
           gradle-version: '9.3.1'
           cache-read-only: false
 
-      - name: 🔑 Setup Google Services & Signing Keys
+      - name: 🔑 Setup Keystore & Google Services
         run: |
-          mkdir -p app/src/debug app/src/release app/
-
-          # 1. فحص وإنشاء google-services.json من Secret أو إنشاء ملف افتراضي لتجاوز خطأ البناء
-          if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
-            echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > app/google-services.json
-          else
-            echo '{"project_info":{"project_number":"0","project_id":"dummy","storage_bucket":"dummy.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"ayman.note"}},"oauth_client":[],"api_key":[{"current_key":"dummy"}],"services":{"analytics_service":{"status":1}}}]}' > app/google-services.json
+          # 1. إنشاء debug.keystore في جذر المشروع والمجال الافتراضي لتجنب خطأ validateSigningDebug
+          if [ ! -f "debug.keystore" ]; then
+            echo "Creating debug.keystore in project root..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-          # 2. إنشاء debug.keystore افتراضي لمنع خطأ validateSigningDebug
           mkdir -p ~/.android
           if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            cp debug.keystore ~/.android/debug.keystore
+          fi
+
+          # 2. إنشاء google-services.json من Secret أو إنشاء ملف وهمي لمنع فشل البناء
+          mkdir -p app/
+          if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
+            echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > app/google-services.json
+          elif [ ! -f "app/google-services.json" ]; then
+            echo '{"project_info":{"project_number":"0","project_id":"dummy","storage_bucket":"dummy.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"ayman.note"}},"oauth_client":[],"api_key":[{"current_key":"dummy"}],"services":{"analytics_service":{"status":1}}}]}' > app/google-services.json
           fi
 
       - name: 🔧 Grant Execute Permission for Gradlew
