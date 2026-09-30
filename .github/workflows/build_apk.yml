@@ -44,20 +44,20 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: 📱 Set up Android SDK
+      - name: 📱 Set up Android SDK & Accept Licenses
         uses: android-actions/setup-android@v3
-
-      - name: 🐘 Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.3.1'
-          cache-read-only: false
+          accept-android-sdk-licenses: true
+
+      - name: 📜 Force Accept All SDK Licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: 🔑 Setup Keystore & Google Services
         run: |
-          # 1. إنشاء debug.keystore في جذر المشروع والمجال الافتراضي لتجنب خطأ validateSigningDebug
+          # 1. إنشاء debug.keystore في الجذر والمجلد الافتراضي
           if [ ! -f "debug.keystore" ]; then
-            echo "Creating debug.keystore in project root..."
+            echo "Creating debug.keystore..."
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
@@ -66,19 +66,24 @@ jobs:
             cp debug.keystore ~/.android/debug.keystore
           fi
 
-          # 2. إنشاء google-services.json من Secret أو إنشاء ملف وهمي لمنع فشل البناء
+          # 2. استخراج اسم الحزمة تلقائيًا لملف google-services.json الوهمي
+          PACKAGE_NAME=$(grep -oP 'namespace\s*=?\s*["\']\K[^"\']+' app/build.gradle* 2>/dev/null || echo "com.example.app")
+
+          # 3. إنشاء google-services.json إذا لم يكن موجودًا
           mkdir -p app/
           if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
             echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > app/google-services.json
           elif [ ! -f "app/google-services.json" ]; then
-            echo '{"project_info":{"project_number":"0","project_id":"dummy","storage_bucket":"dummy.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"ayman.note"}},"oauth_client":[],"api_key":[{"current_key":"dummy"}],"services":{"analytics_service":{"status":1}}}]}' > app/google-services.json
+            echo "{"project_info":{"project_number":"0","project_id":"dummy","storage_bucket":"dummy.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"$PACKAGE_NAME"}},"oauth_client":[],"api_key":[{"current_key":"dummy"}],"services":{"analytics_service":{"status":1}}}]}" > app/google-services.json
           fi
 
-      - name: 🔧 Grant Execute Permission for Gradlew
+      - name: 🔧 Setup & Grant Execute Permission for Gradlew
         run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
+          if [ ! -f "./gradlew" ]; then
+            echo "Gradle wrapper not found, generating..."
+            gradle wrapper
           fi
+          chmod +x ./gradlew
 
       - name: 🏗️ Build APK
         env:
@@ -86,9 +91,9 @@ jobs:
         run: |
           echo "Building APK for mode: $BUILD_TYPE..."
           if [ "$BUILD_TYPE" = "release" ]; then
-            ./gradlew :app:assembleRelease --stacktrace || gradle :app:assembleRelease --stacktrace
+            ./gradlew assembleRelease --stacktrace
           else
-            ./gradlew :app:assembleDebug --stacktrace || gradle :app:assembleDebug --stacktrace
+            ./gradlew assembleDebug --stacktrace
           fi
 
       - name: 🔍 Locate Built APK
@@ -107,15 +112,15 @@ jobs:
       - name: 📤 Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NoteA-${{ github.event.inputs.build_type || 'debug' }}-apk
+          name: ${{ github.event.repository.name }}-${{ github.event.inputs.build_type || 'debug' }}-apk
           path: ${{ steps.find_apk.outputs.apk_path }}
           retention-days: 30
           if-no-files-found: error
 
       - name: 📝 Add Build Summary
         run: |
-          echo "### 🚀 Note A - Build Completed Successfully!" >> $GITHUB_STEP_SUMMARY
-          echo "- **Package ID:** \`ayman.note\`" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Build Completed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** \`${{ github.repository }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Artifact:** \`${{ steps.find_apk.outputs.apk_filename }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Build Mode:** \`${{ github.event.inputs.build_type || 'debug' }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
