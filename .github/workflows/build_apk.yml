@@ -44,14 +44,26 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: 📱 Set up Android SDK & Accept Licenses
+      - name: 📱 Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
           accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
 
-      - name: 📜 Force Accept All SDK Licenses
+      - name: 📜 Force Accept All SDK Licenses Dynamically
         run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          # 1. القبول التلقائي باستخدام التمرير لجميع أدوات sdkmanager المتاحة
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+          find $ANDROID_HOME/cmdline-tools -name "sdkmanager" -exec yes \; | {} --licenses 2>/dev/null || true
+
+          # 2. إنشاء التراخيص يدويًا لمنع الشاشة التفاعلية تمامًا
+          mkdir -p "$ANDROID_HOME/licenses"
+          echo -e "\n8933b5ace80cd055785009300d6432e1b86e6595\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63718c303d0806d510d49d37243f1ee2" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo -e "\n84831b9402116e267a9081e2617f69f2f9d64449" > "$ANDROID_HOME/licenses/android-googletv-license"
+          echo -e "\n7a2473f5320d4da492a454508d4708596540dbd4" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          echo -e "\n33b622e746b07d801c2963d350926875e15f616b" > "$ANDROID_HOME/licenses/intel-android-sysimage-license"
+          echo -e "\ne9673715a05720036141739d5b9001ce83ee659e" > "$ANDROID_HOME/licenses/mips-android-sysimage-license"
+          echo -e "\n6010077a03843d6ab4c074736f3334d9d69f2a52" > "$ANDROID_HOME/licenses/android-googledrive-license"
 
       - name: 🔑 Setup Keystore & Google Services
         run: |
@@ -74,7 +86,7 @@ jobs:
           if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
             echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > app/google-services.json
           elif [ ! -f "app/google-services.json" ]; then
-            echo "{"project_info":{"project_number":"0","project_id":"dummy","storage_bucket":"dummy.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"$PACKAGE_NAME"}},"oauth_client":[],"api_key":[{"current_key":"dummy"}],"services":{"analytics_service":{"status":1}}}]}" > app/google-services.json
+            echo "{\"project_info\":{\"project_number\":\"0\",\"project_id\":\"dummy\",\"storage_bucket\":\"dummy.appspot.com\"},\"client\":[{\"client_info\":{\"mobilesdk_app_id\":\"1:0:android:0\",\"android_client_info\":{\"package_name\":\"$PACKAGE_NAME\"}},\"oauth_client\":[],\"api_key\":[{\"current_key\":\"dummy\"}],\"services\":{\"analytics_service\":{\"status\":1}}}]}" > app/google-services.json
           fi
 
       - name: 🔧 Setup & Grant Execute Permission for Gradlew
