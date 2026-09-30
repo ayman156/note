@@ -46,7 +46,8 @@ jobs:
           fetch-depth: 1
 
       # ==========================================
-      # Java 17
+      # JDK 17
+      # AGP 9.1.1 requires JDK 17
       # ==========================================
 
       - name: ☕ Setup JDK 17
@@ -75,11 +76,12 @@ jobs:
             exit 1
           fi
 
-          echo "Using sdkmanager:"
+          echo ""
+          echo "sdkmanager version:"
           "$SDKMANAGER" --version
 
       # ==========================================
-      # Accept SDK licenses non-interactively
+      # Android SDK Licenses
       # ==========================================
 
       - name: 📜 Accept Android SDK Licenses
@@ -104,61 +106,78 @@ jobs:
           84831b9402116e267a9081e2617f69f2f9d64449
           EOF
 
-          # Google TV license
+          # Google TV
           cat > "$LICENSE_DIR/android-googletv-license" <<'EOF'
           6010077a03843d6ab4c074736f3334d9d69f2a52
           EOF
 
-          # Intel license
-          cat > "$LICENSE_DIR/intel-android-sysimage-license" <<'EOF'
-          d975f751698a77b662d8e3c8c8c0f2d0e7e9e0e4
-          EOF
-
-          echo "Android SDK licenses prepared."
-
-          # Also attempt normal acceptance without allowing
-          # the command to stop the workflow.
+          # Try standard non-interactive acceptance as well
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
 
-      # ==========================================
-      # Show SDK information
-      # ==========================================
-
-      - name: 🔍 Check Android SDK
-        shell: bash
-        run: |
-          set +e
-
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-
-          echo "Installed Android SDK packages:"
-          "$SDKMANAGER" --list_installed || true
-
-          echo ""
-          echo "Available platforms:"
-          "$SDKMANAGER" --list | grep -E "platforms;android-|build-tools;" | head -40 || true
+          echo "SDK licenses prepared."
 
       # ==========================================
-      # Install required Android SDK
+      # Install Android 16 QPR2 / API 36.1
       # ==========================================
 
-      - name: 📦 Install Android SDK Components
+      - name: 📦 Install Android SDK 36.1
         shell: bash
         run: |
           set -e
 
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
 
-          echo "Installing platform-tools..."
-          "$SDKMANAGER" "platform-tools"
+          echo "Installing Android SDK Platform 36.1..."
 
-          echo "Installing Android API 35..."
-          "$SDKMANAGER" "platforms;android-35"
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
 
-          echo "Installing Build Tools 35.0.0..."
-          "$SDKMANAGER" "build-tools;35.0.0"
+          echo ""
+          echo "Installed SDK packages:"
+          "$SDKMANAGER" --list_installed
 
-          echo "Android SDK installation completed."
+      # ==========================================
+      # Install Gradle 9.3.1
+      #
+      # This intentionally does NOT use ./gradlew
+      # because gradle-wrapper.jar is missing.
+      # ==========================================
+
+      - name: 🐘 Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "9.3.1"
+
+      # ==========================================
+      # Check Gradle
+      # ==========================================
+
+      - name: 🔍 Check Build Environment
+        shell: bash
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Java"
+          echo "=========================================="
+
+          java -version
+
+          echo ""
+          echo "=========================================="
+          echo "Gradle"
+          echo "=========================================="
+
+          gradle --version
+
+          echo ""
+          echo "=========================================="
+          echo "Android SDK"
+          echo "=========================================="
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
 
       # ==========================================
       # Debug Keystore
@@ -193,6 +212,9 @@ jobs:
 
           fi
 
+          # Your build.gradle.kts expects this file
+          cp "$HOME/.android/debug.keystore" ./debug.keystore
+
       # ==========================================
       # Google Services
       # ==========================================
@@ -207,13 +229,19 @@ jobs:
 
           mkdir -p app
 
-          # Existing file
+          # ------------------------------------------
+          # Existing google-services.json
+          # ------------------------------------------
+
           if [ -f "app/google-services.json" ]; then
             echo "Existing google-services.json found."
             exit 0
           fi
 
+          # ------------------------------------------
           # GitHub Secret
+          # ------------------------------------------
+
           if [ -n "$GOOGLE_SERVICES_JSON" ]; then
 
             echo "Creating google-services.json from GitHub Secret."
@@ -224,13 +252,27 @@ jobs:
 
           fi
 
-          # Detect namespace
-          PACKAGE_NAME="com.example.app"
+          # ------------------------------------------
+          # Detect package name
+          # ------------------------------------------
 
-          if [ -f "app/build.gradle" ]; then
+          PACKAGE_NAME="ayman.note"
+
+          if [ -f "app/build.gradle.kts" ]; then
 
             DETECTED_PACKAGE=$(grep -oP \
-              'namespace\s*[=:]\s*["'\'']\K[^"'\'']+' \
+              'applicationId\s*=\s*["'\'']\K[^"'\'']+' \
+              app/build.gradle.kts \
+              | head -n 1 || true)
+
+            if [ -n "$DETECTED_PACKAGE" ]; then
+              PACKAGE_NAME="$DETECTED_PACKAGE"
+            fi
+
+          elif [ -f "app/build.gradle" ]; then
+
+            DETECTED_PACKAGE=$(grep -oP \
+              'applicationId\s*[=:]\s*["'\'']\K[^"'\'']+' \
               app/build.gradle \
               | head -n 1 || true)
 
@@ -240,20 +282,11 @@ jobs:
 
           fi
 
-          if [ -f "app/build.gradle.kts" ]; then
-
-            DETECTED_PACKAGE=$(grep -oP \
-              'namespace\s*=\s*["'\'']\K[^"'\'']+' \
-              app/build.gradle.kts \
-              | head -n 1 || true)
-
-            if [ -n "$DETECTED_PACKAGE" ]; then
-              PACKAGE_NAME="$DETECTED_PACKAGE"
-            fi
-
-          fi
-
           echo "Detected package: $PACKAGE_NAME"
+
+          # ------------------------------------------
+          # Dummy Google Services
+          # ------------------------------------------
 
           cat > app/google-services.json <<EOF
           {
@@ -289,26 +322,6 @@ jobs:
           echo "Dummy google-services.json created."
 
       # ==========================================
-      # Gradle Wrapper
-      # ==========================================
-
-      - name: 🔧 Setup Gradle Wrapper
-        shell: bash
-        run: |
-          set -e
-
-          if [ ! -f "./gradlew" ]; then
-            echo "::error::gradlew was not found."
-            echo "The Gradle wrapper must be committed to the repository."
-            exit 1
-          fi
-
-          chmod +x ./gradlew
-
-          echo "Gradle version:"
-          ./gradlew --version
-
-      # ==========================================
       # Determine Build Type
       # ==========================================
 
@@ -328,6 +341,9 @@ jobs:
 
       # ==========================================
       # Build
+      #
+      # IMPORTANT:
+      # Use "gradle", NOT "./gradlew"
       # ==========================================
 
       - name: 🏗️ Build Android APK
@@ -338,26 +354,31 @@ jobs:
           BUILD_TYPE="${{ steps.build_type.outputs.build_type }}"
 
           echo "=========================================="
-          echo "Building Android APK"
+          echo "Building Note A"
+          echo "Package: ayman.note"
           echo "Build type: $BUILD_TYPE"
+          echo "Gradle: 9.3.1"
+          echo "AGP: 9.1.1"
+          echo "Kotlin: 2.2.10"
+          echo "Compile SDK: 36.1"
           echo "=========================================="
 
           if [ "$BUILD_TYPE" = "release" ]; then
 
-            ./gradlew assembleRelease \
+            gradle assembleRelease \
               --stacktrace \
               --no-daemon
 
           else
 
-            ./gradlew assembleDebug \
+            gradle assembleDebug \
               --stacktrace \
               --no-daemon
 
           fi
 
       # ==========================================
-      # Find APK
+      # Locate APK
       # ==========================================
 
       - name: 🔍 Locate Built APK
@@ -368,23 +389,20 @@ jobs:
 
           echo "Searching for APK files..."
 
-          find . \
+          find app/build/outputs/apk \
             -type f \
             -name "*.apk" \
-            -not -path "./.gradle/*" \
             -print
 
-          APK_FILE=$(find . \
+          APK_FILE=$(find app/build/outputs/apk \
             -type f \
-            -path "*/build/outputs/apk/*.apk" \
+            -name "*.apk" \
             | head -n 1)
 
           if [ -z "$APK_FILE" ]; then
             echo "::error::No APK file was found."
             exit 1
           fi
-
-          APK_FILE="${APK_FILE#./}"
 
           echo ""
           echo "APK found:"
@@ -417,8 +435,11 @@ jobs:
           echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repository | \`${{ github.repository }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Package | \`ayman.note\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Build Type | \`${{ steps.build_type.outputs.build_type }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| APK | \`${{ steps.find_apk.outputs.apk_filename }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Gradle | \`9.3.1\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| AGP | \`9.1.1\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Kotlin | \`2.2.10\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Compile SDK | \`36.1\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Triggered By | \`${{ github.actor }}\` |" >> "$GITHUB_STEP_SUMMARY"
-
