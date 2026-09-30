@@ -5,16 +5,18 @@ on:
     branches:
       - main
       - master
+
   pull_request:
     branches:
       - main
       - master
+
   workflow_dispatch:
     inputs:
       build_type:
-        description: 'Build Type (debug or release)'
+        description: "Build Type"
         required: true
-        default: 'debug'
+        default: "debug"
         type: choice
         options:
           - debug
@@ -28,112 +30,324 @@ jobs:
   build:
     name: 🚀 Build APK
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
 
     steps:
+
+      # --------------------------------------------------
+      # Checkout
+      # --------------------------------------------------
+
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
+      # --------------------------------------------------
+      # Java
+      # --------------------------------------------------
+
       - name: ☕ Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
-          cache: 'gradle'
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      # --------------------------------------------------
+      # Android SDK
+      # --------------------------------------------------
 
       - name: 📱 Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          accept-android-sdk-licenses: true
-          log-accepted-android-sdk-licenses: false
 
-      - name: 📜 Force Accept All SDK Licenses Dynamically
+      # --------------------------------------------------
+      # Accept Android SDK licenses
+      # --------------------------------------------------
+
+      - name: 📜 Accept Android SDK Licenses
+        shell: bash
         run: |
-          # 1. القبول التلقائي باستخدام التمرير لجميع أدوات sdkmanager المتاحة
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
-          find $ANDROID_HOME/cmdline-tools -name "sdkmanager" -exec yes \; | {} --licenses 2>/dev/null || true
+          set +e
 
-          # 2. إنشاء التراخيص يدويًا لمنع الشاشة التفاعلية تمامًا
-          mkdir -p "$ANDROID_HOME/licenses"
-          echo -e "\n8933b5ace80cd055785009300d6432e1b86e6595\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63718c303d0806d510d49d37243f1ee2" > "$ANDROID_HOME/licenses/android-sdk-license"
-          echo -e "\n84831b9402116e267a9081e2617f69f2f9d64449" > "$ANDROID_HOME/licenses/android-googletv-license"
-          echo -e "\n7a2473f5320d4da492a454508d4708596540dbd4" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-          echo -e "\n33b622e746b07d801c2963d350926875e15f616b" > "$ANDROID_HOME/licenses/intel-android-sysimage-license"
-          echo -e "\ne9673715a05720036141739d5b9001ce83ee659e" > "$ANDROID_HOME/licenses/mips-android-sysimage-license"
-          echo -e "\n6010077a03843d6ab4c074736f3334d9d69f2a52" > "$ANDROID_HOME/licenses/android-googledrive-license"
+          yes | sdkmanager --licenses >/dev/null 2>&1
 
-      - name: 🔑 Setup Keystore & Google Services
+          exit 0
+
+      # --------------------------------------------------
+      # Detect Android SDK requirements
+      # --------------------------------------------------
+
+      - name: 🔍 Detect Android SDK Configuration
+        shell: bash
         run: |
-          # 1. إنشاء debug.keystore في الجذر والمجلد الافتراضي
-          if [ ! -f "debug.keystore" ]; then
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          echo ""
+          echo "Installed SDK packages:"
+          sdkmanager --list_installed || true
+
+      # --------------------------------------------------
+      # Install common Android SDK components
+      # --------------------------------------------------
+
+      - name: 📦 Install Android SDK Components
+        shell: bash
+        run: |
+          set -e
+
+          sdkmanager "platform-tools"
+
+          # Install common Android platforms/build tools.
+          # If your project uses another compileSdk, add it here.
+
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
+
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
+      # --------------------------------------------------
+      # Debug Keystore
+      # --------------------------------------------------
+
+      - name: 🔑 Setup Debug Keystore
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p "$HOME/.android"
+
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
             echo "Creating debug.keystore..."
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+            keytool \
+              -genkeypair \
+              -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          else
+            echo "Debug keystore already exists."
           fi
 
-          mkdir -p ~/.android
-          if [ ! -f ~/.android/debug.keystore ]; then
-            cp debug.keystore ~/.android/debug.keystore
-          fi
+      # --------------------------------------------------
+      # Google Services
+      # --------------------------------------------------
 
-          # 2. استخراج اسم الحزمة تلقائيًا لملف google-services.json الوهمي
-          PACKAGE_NAME=$(grep -oP 'namespace\s*=?\s*["\']\K[^"\']+' app/build.gradle* 2>/dev/null || echo "com.example.app")
-
-          # 3. إنشاء google-services.json إذا لم يكن موجودًا
-          mkdir -p app/
-          if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
-            echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > app/google-services.json
-          elif [ ! -f "app/google-services.json" ]; then
-            echo "{\"project_info\":{\"project_number\":\"0\",\"project_id\":\"dummy\",\"storage_bucket\":\"dummy.appspot.com\"},\"client\":[{\"client_info\":{\"mobilesdk_app_id\":\"1:0:android:0\",\"android_client_info\":{\"package_name\":\"$PACKAGE_NAME\"}},\"oauth_client\":[],\"api_key\":[{\"current_key\":\"dummy\"}],\"services\":{\"analytics_service\":{\"status\":1}}}]}" > app/google-services.json
-          fi
-
-      - name: 🔧 Setup & Grant Execute Permission for Gradlew
+      - name: 🔑 Setup Google Services
+        shell: bash
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          if [ ! -f "./gradlew" ]; then
-            echo "Gradle wrapper not found, generating..."
-            gradle wrapper
+          set -e
+
+          mkdir -p app
+
+          # If the repository already contains google-services.json,
+          # don't overwrite it.
+
+          if [ -f "app/google-services.json" ]; then
+            echo "Existing google-services.json found."
+            exit 0
           fi
+
+          # If a secret was provided, decode it.
+
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "Creating google-services.json from GitHub Secret."
+
+            echo "$GOOGLE_SERVICES_JSON" | base64 --decode > app/google-services.json
+
+            exit 0
+          fi
+
+          # --------------------------------------------------
+          # Create a dummy configuration only if necessary.
+          # This prevents Firebase/Google Services from failing
+          # when the project does not actually use Firebase.
+          # --------------------------------------------------
+
+          PACKAGE_NAME="com.example.app"
+
+          if [ -f "app/build.gradle" ]; then
+            DETECTED_PACKAGE=$(grep -oP 'namespace\s*[=:]\s*["'\'']\K[^"'\'']+' app/build.gradle | head -n 1 || true)
+
+            if [ -n "$DETECTED_PACKAGE" ]; then
+              PACKAGE_NAME="$DETECTED_PACKAGE"
+            fi
+          fi
+
+          if [ -f "app/build.gradle.kts" ]; then
+            DETECTED_PACKAGE=$(grep -oP 'namespace\s*=\s*["'\'']\K[^"'\'']+' app/build.gradle.kts | head -n 1 || true)
+
+            if [ -n "$DETECTED_PACKAGE" ]; then
+              PACKAGE_NAME="$DETECTED_PACKAGE"
+            fi
+          fi
+
+          echo "Detected package: $PACKAGE_NAME"
+
+          cat > app/google-services.json <<EOF
+          {
+            "project_info": {
+              "project_number": "0",
+              "project_id": "dummy",
+              "storage_bucket": "dummy.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:0:android:0",
+                  "android_client_info": {
+                    "package_name": "$PACKAGE_NAME"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "dummy"
+                  }
+                ],
+                "services": {
+                  "analytics_service": {
+                    "status": 1
+                  }
+                }
+              }
+            ]
+          }
+          EOF
+
+          echo "Dummy google-services.json created."
+
+      # --------------------------------------------------
+      # Gradle Wrapper
+      # --------------------------------------------------
+
+      - name: 🔧 Setup Gradle Wrapper
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f "./gradlew" ]; then
+            echo "::error::gradlew was not found."
+            echo "Please include the Gradle wrapper in the repository."
+            exit 1
+          fi
+
           chmod +x ./gradlew
 
-      - name: 🏗️ Build APK
-        env:
-          BUILD_TYPE: ${{ github.event.inputs.build_type || 'debug' }}
+          ./gradlew --version
+
+      # --------------------------------------------------
+      # Determine Build Type
+      # --------------------------------------------------
+
+      - name: 🧩 Determine Build Type
+        id: build_type
+        shell: bash
         run: |
-          echo "Building APK for mode: $BUILD_TYPE..."
-          if [ "$BUILD_TYPE" = "release" ]; then
-            ./gradlew assembleRelease --stacktrace
-          else
-            ./gradlew assembleDebug --stacktrace
+          BUILD_TYPE="${{ github.event.inputs.build_type }}"
+
+          if [ -z "$BUILD_TYPE" ]; then
+            BUILD_TYPE="debug"
           fi
+
+          echo "BUILD_TYPE=$BUILD_TYPE"
+          echo "build_type=$BUILD_TYPE" >> "$GITHUB_OUTPUT"
+
+      # --------------------------------------------------
+      # Build APK
+      # --------------------------------------------------
+
+      - name: 🏗️ Build Android APK
+        shell: bash
+        run: |
+          set -e
+
+          BUILD_TYPE="${{ steps.build_type.outputs.build_type }}"
+
+          echo "======================================"
+          echo "Building Android APK"
+          echo "Build type: $BUILD_TYPE"
+          echo "======================================"
+
+          if [ "$BUILD_TYPE" = "release" ]; then
+            ./gradlew assembleRelease --stacktrace --no-daemon
+          else
+            ./gradlew assembleDebug --stacktrace --no-daemon
+          fi
+
+      # --------------------------------------------------
+      # Find APK
+      # --------------------------------------------------
 
       - name: 🔍 Locate Built APK
         id: find_apk
+        shell: bash
         run: |
-          echo "Listing generated APK files:"
-          APK_FILE=$(find app/build/outputs/apk -type f -name "*.apk" | head -n 1)
+          set -e
+
+          echo "Searching for APK files..."
+
+          find . \
+            -type f \
+            -name "*.apk" \
+            -not -path "./.gradle/*" \
+            -print
+
+          APK_FILE=$(find . \
+            -type f \
+            -path "*/build/outputs/apk/*.apk" \
+            | head -n 1)
+
           if [ -z "$APK_FILE" ]; then
-            echo "::error::No APK file found in app/build/outputs/apk"
+            echo "::error::No APK file was found."
             exit 1
           fi
-          echo "Found APK: $APK_FILE"
-          echo "apk_path=$APK_FILE" >> $GITHUB_OUTPUT
-          echo "apk_filename=$(basename $APK_FILE)" >> $GITHUB_OUTPUT
+
+          APK_FILE="${APK_FILE#./}"
+
+          echo ""
+          echo "APK found:"
+          echo "$APK_FILE"
+
+          echo "apk_path=$APK_FILE" >> "$GITHUB_OUTPUT"
+          echo "apk_filename=$(basename "$APK_FILE")" >> "$GITHUB_OUTPUT"
+
+      # --------------------------------------------------
+      # Upload APK
+      # --------------------------------------------------
 
       - name: 📤 Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.repository.name }}-${{ github.event.inputs.build_type || 'debug' }}-apk
+          name: ${{ github.event.repository.name }}-${{ steps.build_type.outputs.build_type }}-apk
           path: ${{ steps.find_apk.outputs.apk_path }}
           retention-days: 30
           if-no-files-found: error
 
+      # --------------------------------------------------
+      # Build Summary
+      # --------------------------------------------------
+
       - name: 📝 Add Build Summary
+        shell: bash
         run: |
-          echo "### 🚀 Build Completed Successfully!" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository:** \`${{ github.repository }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Artifact:** \`${{ steps.find_apk.outputs.apk_filename }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Mode:** \`${{ github.event.inputs.build_type || 'debug' }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Triggered by:** \`${{ github.actor }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Android Build Completed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repository | \`${{ github.repository }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build Type | \`${{ steps.build_type.outputs.build_type }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| APK | \`${{ steps.find_apk.outputs.apk_filename }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Triggered By | \`${{ github.actor }}\` |" >> "$GITHUB_STEP_SUMMARY"
